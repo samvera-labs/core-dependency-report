@@ -3,6 +3,20 @@ require 'json'
 require 'csv'
 require 'net/http'
 require 'base64'
+def sleep_time(http, headers)
+	rate_uri = URI("https://api.github.com/rate_limit")
+	result = headers['Authorization'] ? 0.5 : 60
+	now = Time.now.to_i - 1 # I'm nervous about clock synching
+	remaining = 0
+	http.request_get(rate_uri, headers) do |response|
+		rate_info = JSON.load(response.body)
+		result = rate_info.fetch("rate",{})["reset"] || now + result
+		result = result - now
+		remaining = rate_info.fetch("rate",{})["remaining"] || 0
+	end
+	remaining > 0 ? 0 : result
+end
+
 headers = {
 	'Accept' => "application/vnd.github.v3.text-match+json"
 }
@@ -14,11 +28,12 @@ uri = URI(fetch_endpoint)
 dates = {}
 FileUtils.mkdir_p("tmp/refs")
 # rate limits: 5000/hr for OAuth, 60/hour without
-sleep_time = headers['Authorization'] ? 0.5 : 60
+counter = 0
 Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
 	CSV.foreach('fixtures/partners.csv', headers: true) do |row|
 		org = row['Github Org']
-		search_results = JSON.load(File.read("tmp/#{org}/response.json"))['items']
+		search_results = JSON.load(File.read("tmp/#{org}/response.json"))['items'] || []
+		puts "#{org} had no items" unless search_results[0]
 		links = search_results.map {|result| result['url'] }
 		links.each do |link|
 			uri = URI(link)
@@ -32,8 +47,15 @@ Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
 					enc = file_info['content']
 					blob.write(Base64.decode64(enc))
 				end
+				counter += 1
 			end
-			sleep(sleep_time)
+			if counter > 2_000
+				time = sleep_time(http, headers)
+				if time > 0
+					sleep(time)
+					counter = 0
+				end
+			end
 		end
 	end
 end
