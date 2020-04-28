@@ -1,1 +1,5 @@
-# this is a stub for bundler, which is required
+source "https://rubygems.org"
+
+group :development, :test do
+  gem "pry-byebug"
+end
