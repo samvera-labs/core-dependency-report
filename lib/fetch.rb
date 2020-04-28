@@ -3,6 +3,8 @@ require 'json'
 require 'csv'
 require 'net/http'
 require 'base64'
+require 'pry-byebug'
+
 def sleep_time(http, headers)
 	rate_uri = URI("https://api.github.com/rate_limit")
 	result = headers['Authorization'] ? 0.5 : 60
@@ -33,7 +35,7 @@ Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
 	CSV.foreach('fixtures/partners.csv', headers: true) do |row|
 		org = row['Github Org']
 		search_results = JSON.load(File.read("tmp/#{org}/response.json"))['items'] || []
-		puts "#{org} had no items" unless search_results[0]
+    	puts "#{org} had no items" if search_results.empty?
 		links = search_results.map {|result| result['url'] }
 		links.each do |link|
 			uri = URI(link)
@@ -41,8 +43,16 @@ Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
 			ref = parms.detect {|parm| parm[0] == 'ref'}
 			http.request_get(uri, headers) do |response|
 				date = Date._httpdate(response['Last-Modified'])
-				dates[ref[1]] = Date.new(date[:year],date[:mon],date[:mday]).to_s
-				open("tmp/refs/#{ref[1]}",'wb') do |blob|
+        begin
+          new_date = Date.new(date[:year],date[:mon],date[:mday])
+        rescue NoMethodError => error
+          puts "Encountered #{error} for #{date} retrieved from #{uri}"
+          next
+        end
+        ref_key = ref[1]
+        puts "Processing #{ref_key} for #{org} last modified at #{new_date}"
+				dates[ref_key] = new_date.to_s
+				open("tmp/refs/#{ref_key}",'wb') do |blob|
 					file_info = JSON.load(response.body)
 					enc = file_info['content']
 					blob.write(Base64.decode64(enc))
